@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LocalChat</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand-row">
+        <div class="brand-mark">L</div>
+        <div>
+          <div class="brand">LocalChat</div>
+          <div class="brand-subtitle">Ollama local</div>
+        </div>
+      </div>
+
+      <button class="new-chat" id="newChatBtn" type="button">＋ Novo chat</button>
+
+      <div class="sidebar-title">Conversas</div>
+      <div class="conversation-list" id="conversationList"></div>
+
+      <div class="sidebar-footer">
+        <div class="status-line">
+          <span class="status-dot" id="statusDot"></span>
+          <span id="statusText">Verificando Ollama…</span>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <button class="icon-button mobile-only" id="menuBtn" type="button" aria-label="Abrir menu">☰</button>
+
+        <div class="model-box">
+          <label for="modelSelect">Modelo</label>
+          <select id="modelSelect">
+            <option value="">Carregando…</option>
+          </select>
+        </div>
+
+        <button class="icon-button" id="settingsBtn" type="button" title="Configurações" aria-label="Configurações">⚙</button>
+      </header>
+
+      <section class="chat-area" id="chatArea">
+        <div class="welcome" id="welcome">
+          <div class="welcome-logo">L</div>
+          <h1>LocalChat</h1>
+          <p>Uma interface local para conversar com seus modelos do Ollama.</p>
+        </div>
+
+        <div class="messages" id="messages"></div>
+      </section>
+
+      <footer class="composer-wrap">
+        <div class="composer">
+          <textarea
+            id="promptInput"
+            rows="1"
+            placeholder="Mensagem para o modelo…"
+            aria-label="Mensagem"
+          ></textarea>
+
+          <button class="send-button" id="sendBtn" type="button" aria-label="Enviar">↑</button>
+          <button class="stop-button hidden" id="stopBtn" type="button" aria-label="Parar">■</button>
+        </div>
+        <div class="composer-help">Enter envia · Shift+Enter quebra a linha · tudo roda localmente</div>
+      </footer>
+    </main>
+  </div>
+
+  <div class="modal-backdrop hidden" id="settingsModal">
+    <div class="modal">
+      <div class="modal-head">
+        <h2>Configurações</h2>
+        <button class="icon-button" id="closeSettingsBtn" type="button">✕</button>
+      </div>
+
+      <label class="field-label" for="systemPrompt">Prompt de sistema</label>
+      <textarea
+        id="systemPrompt"
+        class="settings-textarea"
+        rows="7"
+        placeholder="Ex.: Responda sempre em português, de forma objetiva."
+      ></textarea>
+
+      <div class="modal-actions">
+        <button class="secondary-button" id="clearAllBtn" type="button">Apagar histórico</button>
+        <button class="primary-button" id="saveSettingsBtn" type="button">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    window.LOCALCHAT_DEFAULT_MODEL = {{ default_model|tojson }};
+  </script>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+
+# Backups dos patches
+*.bak
+*.bak_*
+
+# Backups dos patches
+*.bak
+*.bak_*
+
+# Backups dos patches
+*.bak
+*.bak_*
