@@ -98,6 +98,8 @@ def chat():
 
                 for line in upstream.iter_lines(decode_unicode=True):
                     if line:
+                        if isinstance(line, bytes):
+                            line = line.decode("utf-8", errors="replace")
                         yield line + "\n"
 
         except requests.RequestException as exc:
