@@ -65,6 +65,8 @@ A interface reconstrói o conteúdo a partir da própria conversa e compara sua 
 
 O conteúdo completo não é duplicado no trace persistido, evitando crescimento quadrático do `localStorage`.
 
+A interface distingue três noções que podem ter grafias diferentes: o rótulo amigável do perfil, o ID canônico usado pelo Ollama e o tamanho de parâmetros reportado pelo runtime. Assim, um modelo identificado como `deepseek-coder:6.7b` pode aparecer com tamanho reportado `7B` sem representar pesos diferentes; o digest continua sendo a identidade verificável do artefato executado.
+
 ## Métricas
 
 Quando o Ollama envia o chunk final de uma resposta, o LocalChat preserva na conversa:

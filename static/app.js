@@ -584,7 +584,7 @@ function renderModelMeta() {
 
   const details = model.details || {};
   const profile = model.profile || {};
-  const parts = [];
+  const parts = [model.name];
 
   if (profile.category) parts.push(profile.category);
   if (details.parameter_size) parts.push(details.parameter_size);
@@ -867,7 +867,14 @@ async function openContextTrace(messageIndex) {
   el.contextEntries.innerHTML = "";
 
   const digest = trace?.digest || run.digest || "";
-  addTraceField("Modelo", trace?.model || run.model || c.model || "—");
+  const modelId = trace?.model || run.model || c.model || "";
+  const modelRecord = state.models.find(model => model.name === modelId) || null;
+  const modelLabel = modelRecord?.profile?.label || modelId || "—";
+  const parameterSize = modelRecord?.details?.parameter_size || "—";
+
+  addTraceField("Modelo", modelLabel);
+  addTraceField("ID Ollama", modelId || "—", modelId || "");
+  addTraceField("Tamanho reportado", parameterSize);
   addTraceField("Digest", shortDigest(digest), digest);
   addTraceField("Parâmetros", formatRunOptions(options));
   addTraceField("Mensagens", String(trace?.message_count ?? contextMessages.length));
