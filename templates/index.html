@@ -41,10 +41,17 @@
               <option value="">Carregando…</option>
             </select>
             <div class="model-meta" id="modelMeta"></div>
+            <div class="experiment-meta" id="experimentMeta"></div>
           </div>
         </div>
 
-        <button class="icon-button" id="settingsBtn" type="button" title="Configurações" aria-label="Configurações">⚙</button>
+        <button
+          class="icon-button"
+          id="settingsBtn"
+          type="button"
+          title="Perfil experimental da conversa"
+          aria-label="Perfil experimental da conversa"
+        >⚗</button>
       </header>
 
       <section class="chat-area" id="chatArea">
@@ -75,9 +82,12 @@
   </div>
 
   <div class="modal-backdrop hidden" id="settingsModal">
-    <div class="modal">
+    <div class="modal experiment-modal">
       <div class="modal-head">
-        <h2>Configurações</h2>
+        <div>
+          <h2>Perfil experimental</h2>
+          <div class="modal-subtitle">Configuração fixa desta conversa; novos chats podem herdar o último perfil salvo.</div>
+        </div>
         <button class="icon-button" id="closeSettingsBtn" type="button">✕</button>
       </div>
 
@@ -85,14 +95,64 @@
       <textarea
         id="systemPrompt"
         class="settings-textarea"
-        rows="7"
+        rows="6"
         placeholder="Ex.: Responda sempre em português, de forma objetiva."
       ></textarea>
 
-      <div class="modal-actions">
-        <button class="secondary-button" id="clearAllBtn" type="button">Apagar histórico</button>
-        <button class="primary-button" id="saveSettingsBtn" type="button">Salvar</button>
+      <div class="experiment-grid">
+        <label class="experiment-field">
+          <span>Temperatura</span>
+          <input id="temperatureInput" type="number" min="0" max="2" step="0.05" placeholder="modelo">
+        </label>
+
+        <label class="experiment-field">
+          <span>Top-p</span>
+          <input id="topPInput" type="number" min="0" max="1" step="0.05" placeholder="modelo">
+        </label>
+
+        <label class="experiment-field">
+          <span>Seed</span>
+          <input id="seedInput" type="number" min="-1" max="2147483647" step="1" placeholder="automático">
+        </label>
+
+        <label class="experiment-field">
+          <span>Contexto (tokens)</span>
+          <input id="numCtxInput" type="number" min="256" max="1048576" step="256" placeholder="modelo">
+        </label>
+
+        <label class="experiment-field">
+          <span>Máx. saída (tokens)</span>
+          <input id="numPredictInput" type="number" min="1" max="131072" step="1" placeholder="modelo">
+        </label>
       </div>
+
+      <div class="profile-note">
+        Campos vazios preservam o padrão do modelo/Ollama. O snapshot usado em cada resposta fica associado ao ensaio.
+      </div>
+
+      <div class="modal-actions modal-actions-split">
+        <button class="secondary-button danger-quiet" id="clearAllBtn" type="button">Apagar histórico</button>
+        <div class="modal-action-group">
+          <button class="secondary-button" id="resetExperimentBtn" type="button">Restaurar padrões</button>
+          <button class="primary-button" id="saveSettingsBtn" type="button">Salvar perfil</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop hidden" id="contextModal">
+    <div class="modal context-modal">
+      <div class="modal-head">
+        <div>
+          <h2>Context trace</h2>
+          <div class="modal-subtitle">Contexto e parâmetros associados à geração selecionada.</div>
+        </div>
+        <button class="icon-button" id="closeContextBtn" type="button">✕</button>
+      </div>
+
+      <div class="trace-grid" id="traceGrid"></div>
+      <div class="trace-status" id="traceStatus"></div>
+      <div class="context-entries" id="contextEntries"></div>
     </div>
   </div>
 

@@ -41,6 +41,48 @@ class LocalChatTests(unittest.TestCase):
         self.assertEqual(result["num_predict"], 131072)
         self.assertNotIn("unknown", result)
 
+    def test_clean_chat_messages_prepends_system_and_filters_invalid_entries(self):
+        result = localchat.clean_chat_messages(
+            [
+                {"role": "user", "content": "Olá"},
+                {"role": "tool", "content": "ignorar"},
+                {"role": "assistant", "content": "Oi"},
+                {"role": "user", "content": 123},
+            ],
+            "Responda em português.",
+        )
+        self.assertEqual(
+            result,
+            [
+                {"role": "system", "content": "Responda em português."},
+                {"role": "user", "content": "Olá"},
+                {"role": "assistant", "content": "Oi"},
+            ],
+        )
+
+    def test_context_trace_is_stable_for_same_context_except_id(self):
+        messages = [
+            {"role": "system", "content": "Português."},
+            {"role": "user", "content": "Teste"},
+        ]
+        first = localchat.build_context_trace(
+            model="qwen2.5:14b",
+            digest="abc",
+            messages=messages,
+            options={"temperature": 0.2, "seed": 42},
+        )
+        second = localchat.build_context_trace(
+            model="qwen2.5:14b",
+            digest="abc",
+            messages=messages,
+            options={"temperature": 0.2, "seed": 42},
+        )
+        self.assertNotEqual(first["id"], second["id"])
+        self.assertEqual(first["context_sha256"], second["context_sha256"])
+        self.assertEqual(first["roles"], ["system", "user"])
+        self.assertEqual(first["message_count"], 2)
+        self.assertEqual(first["characters"], [10, 5])
+
     def test_extract_context_length_uses_largest_context(self):
         info = {
             "model.context_length": 32768,
@@ -80,8 +122,9 @@ class LocalChatTests(unittest.TestCase):
         self.assertEqual(model["context_length"], 8192)
         self.assertEqual(model["profile"]["category"], "embedding")
 
+    @patch("app.resolve_model_digest", return_value="digest-123")
     @patch("app.requests.post")
-    def test_chat_forwards_sanitized_options(self, post_mock):
+    def test_chat_forwards_profile_and_emits_context_trace(self, post_mock, digest_mock):
         upstream = MagicMock()
         upstream.__enter__.return_value = upstream
         upstream.__exit__.return_value = False
@@ -102,16 +145,44 @@ class LocalChatTests(unittest.TestCase):
             "/api/chat",
             json={
                 "model": "qwen2.5:3b",
+                "system_prompt": "Responda em português.",
                 "messages": [{"role": "user", "content": "teste"}],
-                "options": {"temperature": 0.25, "evil": "no"},
+                "options": {
+                    "temperature": 0.25,
+                    "seed": 42,
+                    "num_ctx": 8192,
+                    "evil": "no",
+                },
             },
         )
 
         self.assertEqual(response.status_code, 200)
-        body = response.get_data(as_text=True)
-        self.assertIn('"eval_count": 1', body)
+        lines = [json.loads(line) for line in response.get_data(as_text=True).splitlines()]
+        trace_event = lines[0]["localchat"]
+        self.assertEqual(trace_event["type"], "context_trace")
+        self.assertEqual(trace_event["trace"]["digest"], "digest-123")
+        self.assertEqual(trace_event["trace"]["message_count"], 2)
+        self.assertEqual(trace_event["trace"]["roles"], ["system", "user"])
+        self.assertEqual(
+            trace_event["trace"]["options"],
+            {"temperature": 0.25, "seed": 42, "num_ctx": 8192},
+        )
+        self.assertIn("context_sha256", trace_event["trace"])
+        self.assertEqual(lines[1]["eval_count"], 1)
+
         sent_payload = post_mock.call_args.kwargs["json"]
-        self.assertEqual(sent_payload["options"], {"temperature": 0.25})
+        self.assertEqual(
+            sent_payload["messages"],
+            [
+                {"role": "system", "content": "Responda em português."},
+                {"role": "user", "content": "teste"},
+            ],
+        )
+        self.assertEqual(
+            sent_payload["options"],
+            {"temperature": 0.25, "seed": 42, "num_ctx": 8192},
+        )
+        digest_mock.assert_called_once_with("qwen2.5:3b")
 
 
 if __name__ == "__main__":

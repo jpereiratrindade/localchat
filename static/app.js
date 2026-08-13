@@ -2,6 +2,15 @@ const STORAGE_KEY = "localchat.conversations.v2";
 const LEGACY_STORAGE_KEY = "localchat.conversations.v1";
 const SETTINGS_KEY = "localchat.settings.v1";
 
+const EMPTY_EXPERIMENT = Object.freeze({
+  systemPrompt: "",
+  temperature: null,
+  topP: null,
+  seed: null,
+  numCtx: null,
+  numPredict: null,
+});
+
 const state = {
   conversations: [],
   activeId: null,
@@ -19,6 +28,7 @@ const el = {
   statusText: document.getElementById("statusText"),
   modelSelect: document.getElementById("modelSelect"),
   modelMeta: document.getElementById("modelMeta"),
+  experimentMeta: document.getElementById("experimentMeta"),
   settingsBtn: document.getElementById("settingsBtn"),
   chatArea: document.getElementById("chatArea"),
   welcome: document.getElementById("welcome"),
@@ -29,8 +39,19 @@ const el = {
   settingsModal: document.getElementById("settingsModal"),
   closeSettingsBtn: document.getElementById("closeSettingsBtn"),
   systemPrompt: document.getElementById("systemPrompt"),
+  temperatureInput: document.getElementById("temperatureInput"),
+  topPInput: document.getElementById("topPInput"),
+  seedInput: document.getElementById("seedInput"),
+  numCtxInput: document.getElementById("numCtxInput"),
+  numPredictInput: document.getElementById("numPredictInput"),
+  resetExperimentBtn: document.getElementById("resetExperimentBtn"),
   saveSettingsBtn: document.getElementById("saveSettingsBtn"),
   clearAllBtn: document.getElementById("clearAllBtn"),
+  contextModal: document.getElementById("contextModal"),
+  closeContextBtn: document.getElementById("closeContextBtn"),
+  traceGrid: document.getElementById("traceGrid"),
+  traceStatus: document.getElementById("traceStatus"),
+  contextEntries: document.getElementById("contextEntries"),
 };
 
 function makeId() {
@@ -41,6 +62,62 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function getSettings() {
+  try {
+    return JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function clampOptionalNumber(value, minimum, maximum, integer = false) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  const clamped = Math.max(minimum, Math.min(maximum, parsed));
+  return integer ? Math.trunc(clamped) : clamped;
+}
+
+function normalizeExperiment(raw, fallbackSystemPrompt = "") {
+  const source = raw && typeof raw === "object" ? raw : {};
+  return {
+    systemPrompt:
+      typeof source.systemPrompt === "string"
+        ? source.systemPrompt
+        : (typeof fallbackSystemPrompt === "string" ? fallbackSystemPrompt : ""),
+    temperature: clampOptionalNumber(source.temperature, 0, 2),
+    topP: clampOptionalNumber(source.topP, 0, 1),
+    seed: clampOptionalNumber(source.seed, -1, 2147483647, true),
+    numCtx: clampOptionalNumber(source.numCtx, 256, 1048576, true),
+    numPredict: clampOptionalNumber(source.numPredict, 1, 131072, true),
+  };
+}
+
+function cloneExperiment(experiment) {
+  return normalizeExperiment(experiment);
+}
+
+function defaultExperimentForNewConversation() {
+  const settings = getSettings();
+  if (settings.lastExperiment && typeof settings.lastExperiment === "object") {
+    return normalizeExperiment(settings.lastExperiment, settings.systemPrompt || "");
+  }
+  return normalizeExperiment(EMPTY_EXPERIMENT, settings.systemPrompt || "");
+}
+
+function experimentOptions(experiment) {
+  const profile = normalizeExperiment(experiment);
+  const options = {};
+
+  if (profile.temperature !== null) options.temperature = profile.temperature;
+  if (profile.topP !== null) options.top_p = profile.topP;
+  if (profile.seed !== null) options.seed = profile.seed;
+  if (profile.numCtx !== null) options.num_ctx = profile.numCtx;
+  if (profile.numPredict !== null) options.num_predict = profile.numPredict;
+
+  return options;
+}
+
 function newConversation() {
   const c = {
     id: makeId(),
@@ -48,12 +125,14 @@ function newConversation() {
     createdAt: nowIso(),
     updatedAt: nowIso(),
     model: el.modelSelect?.value || "",
+    experiment: defaultExperimentForNewConversation(),
     messages: [],
   };
   state.conversations.unshift(c);
   state.activeId = c.id;
   saveConversations();
   renderAll();
+  renderExperimentMeta();
   el.promptInput.focus();
 }
 
@@ -63,9 +142,11 @@ function activeConversation() {
 
 function normalizeConversation(c) {
   if (!c || typeof c !== "object") return null;
+  const settings = getSettings();
   return {
     ...c,
     model: typeof c.model === "string" ? c.model : "",
+    experiment: normalizeExperiment(c.experiment, settings.systemPrompt || ""),
     messages: Array.isArray(c.messages) ? c.messages : [],
   };
 }
@@ -95,18 +176,12 @@ function saveConversations() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state.conversations));
 }
 
-function getSettings() {
-  try {
-    return JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
-  } catch {
-    return {};
-  }
-}
-
-function saveSettings() {
+function savePreferences() {
   const settings = getSettings();
-  settings.systemPrompt = el.systemPrompt.value.trim();
+  const c = activeConversation();
   settings.model = el.modelSelect.value || settings.model || "";
+  if (c?.experiment) settings.lastExperiment = cloneExperiment(c.experiment);
+  delete settings.systemPrompt;
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
 
@@ -126,6 +201,7 @@ function deleteConversation(id, event) {
   saveConversations();
   renderAll();
   syncConversationModel();
+  renderExperimentMeta();
 }
 
 function renderConversationList() {
@@ -161,6 +237,7 @@ function renderConversationList() {
       state.activeId = c.id;
       renderAll();
       syncConversationModel();
+      renderExperimentMeta();
       el.sidebar.classList.remove("open");
     });
 
@@ -203,7 +280,7 @@ function metricsSummary(metrics) {
   return parts.join(" · ");
 }
 
-function addMessageElement(role, content, metrics = null) {
+function addMessageElement(role, content, metrics = null, run = null, messageIndex = null) {
   const wrapper = document.createElement("article");
   wrapper.className = `message ${role}`;
 
@@ -222,17 +299,32 @@ function addMessageElement(role, content, metrics = null) {
   body.className = "message-body";
   body.textContent = content;
 
+  const footer = document.createElement("div");
+  footer.className = "message-footer";
+
   const meta = document.createElement("div");
   meta.className = "message-metrics";
   const summary = metricsSummary(metrics);
   meta.textContent = summary;
   meta.classList.toggle("hidden", !summary);
+  footer.appendChild(meta);
 
-  contentWrap.append(roleEl, body, meta);
+  let contextBtn = null;
+  if (role === "assistant" && run && Number.isInteger(messageIndex)) {
+    contextBtn = document.createElement("button");
+    contextBtn.type = "button";
+    contextBtn.className = "context-trace-button";
+    contextBtn.textContent = run.trace ? "contexto ✓" : "contexto";
+    contextBtn.title = "Inspecionar contexto e parâmetros deste ensaio";
+    contextBtn.addEventListener("click", () => openContextTrace(messageIndex));
+    footer.appendChild(contextBtn);
+  }
+
+  contentWrap.append(roleEl, body, footer);
   wrapper.append(avatar, contentWrap);
   el.messages.appendChild(wrapper);
 
-  return { body, meta };
+  return { body, meta, contextBtn };
 }
 
 function renderMessages() {
@@ -242,9 +334,9 @@ function renderMessages() {
   const messages = c?.messages || [];
   el.welcome.classList.toggle("hidden", messages.length > 0);
 
-  for (const msg of messages) {
-    addMessageElement(msg.role, msg.content, msg.metrics || null);
-  }
+  messages.forEach((msg, index) => {
+    addMessageElement(msg.role, msg.content, msg.metrics || null, msg.run || null, index);
+  });
 
   requestAnimationFrame(scrollToBottom);
 }
@@ -252,6 +344,7 @@ function renderMessages() {
 function renderAll() {
   renderConversationList();
   renderMessages();
+  renderExperimentMeta();
 }
 
 function scrollToBottom() {
@@ -268,6 +361,7 @@ function setGenerating(value) {
   el.sendBtn.classList.toggle("hidden", value);
   el.stopBtn.classList.toggle("hidden", !value);
   el.modelSelect.disabled = value;
+  el.settingsBtn.disabled = value;
 }
 
 function deriveTitle(text) {
@@ -291,6 +385,22 @@ function captureMetrics(data) {
     if (data[key] !== undefined && data[key] !== null) metrics[key] = data[key];
   }
   return metrics;
+}
+
+function selectedModel() {
+  return state.models.find(model => model.name === el.modelSelect.value) || null;
+}
+
+function makeRunSnapshot(c, model) {
+  const selected = selectedModel();
+  return {
+    model,
+    digest: selected?.digest || null,
+    contextMessageCount: c.messages.length,
+    profile: cloneExperiment(c.experiment),
+    trace: null,
+    createdAt: nowIso(),
+  };
 }
 
 async function sendMessage() {
@@ -320,10 +430,12 @@ async function sendMessage() {
   saveConversations();
   renderAll();
 
-  const assistantMessage = { role: "assistant", content: "", metrics: null };
+  const run = makeRunSnapshot(c, model);
+  const assistantMessage = { role: "assistant", content: "", metrics: null, run };
   c.messages.push(assistantMessage);
+  const assistantIndex = c.messages.length - 1;
 
-  const assistantEl = addMessageElement("assistant", "");
+  const assistantEl = addMessageElement("assistant", "", null, run, assistantIndex);
   assistantEl.body.classList.add("typing");
   el.welcome.classList.add("hidden");
   scrollToBottom();
@@ -333,7 +445,7 @@ async function sendMessage() {
   setGenerating(true);
 
   try {
-    const settings = getSettings();
+    const options = experimentOptions(run.profile);
 
     const response = await fetch("/api/chat", {
       method: "POST",
@@ -341,8 +453,9 @@ async function sendMessage() {
       signal: controller.signal,
       body: JSON.stringify({
         model,
-        system_prompt: settings.systemPrompt || "",
+        system_prompt: run.profile.systemPrompt || "",
         messages: c.messages.slice(0, -1),
+        options,
       }),
     });
 
@@ -378,6 +491,15 @@ async function sendMessage() {
         try {
           data = JSON.parse(line);
         } catch {
+          continue;
+        }
+
+        if (data.localchat?.type === "context_trace" && data.localchat.trace) {
+          assistantMessage.run.trace = data.localchat.trace;
+          if (data.localchat.trace.digest) {
+            assistantMessage.run.digest = data.localchat.trace.digest;
+          }
+          if (assistantEl.contextBtn) assistantEl.contextBtn.textContent = "contexto ✓";
           continue;
         }
 
@@ -422,6 +544,7 @@ async function sendMessage() {
     assistantEl.body.classList.remove("typing");
     c.updatedAt = nowIso();
     saveConversations();
+    savePreferences();
     renderConversationList();
     setGenerating(false);
     state.controller = null;
@@ -452,10 +575,6 @@ function humanContext(tokens) {
   return `${tokens} ctx`;
 }
 
-function selectedModel() {
-  return state.models.find(model => model.name === el.modelSelect.value) || null;
-}
-
 function renderModelMeta() {
   const model = selectedModel();
   if (!model) {
@@ -476,6 +595,27 @@ function renderModelMeta() {
 
   el.modelMeta.textContent = parts.join(" · ");
   el.modelMeta.title = profile.description || model.name;
+}
+
+function renderExperimentMeta() {
+  const c = activeConversation();
+  if (!c) {
+    el.experimentMeta.textContent = "";
+    return;
+  }
+
+  const profile = normalizeExperiment(c.experiment);
+  const parts = [];
+  if (profile.systemPrompt.trim()) parts.push("sys");
+  if (profile.temperature !== null) parts.push(`temp ${profile.temperature}`);
+  if (profile.topP !== null) parts.push(`top-p ${profile.topP}`);
+  if (profile.seed !== null) parts.push(`seed ${profile.seed}`);
+  if (profile.numCtx !== null) parts.push(`ctx ${profile.numCtx}`);
+  if (profile.numPredict !== null) parts.push(`saída ${profile.numPredict}`);
+
+  el.experimentMeta.textContent = parts.length
+    ? `ensaio · ${parts.join(" · ")}`
+    : "ensaio · padrões do modelo";
 }
 
 function syncConversationModel() {
@@ -564,6 +704,7 @@ async function loadModels() {
     }
 
     renderModelMeta();
+    renderExperimentMeta();
 
   } catch {
     state.models = [];
@@ -585,15 +726,61 @@ async function checkHealth() {
   }
 }
 
+function writeOptionalInput(input, value) {
+  input.value = value === null || value === undefined ? "" : String(value);
+}
+
 function openSettings() {
-  const settings = getSettings();
-  el.systemPrompt.value = settings.systemPrompt || "";
+  const c = activeConversation();
+  if (!c) return;
+  const profile = normalizeExperiment(c.experiment);
+  el.systemPrompt.value = profile.systemPrompt;
+  writeOptionalInput(el.temperatureInput, profile.temperature);
+  writeOptionalInput(el.topPInput, profile.topP);
+  writeOptionalInput(el.seedInput, profile.seed);
+  writeOptionalInput(el.numCtxInput, profile.numCtx);
+  writeOptionalInput(el.numPredictInput, profile.numPredict);
   el.settingsModal.classList.remove("hidden");
   el.systemPrompt.focus();
 }
 
 function closeSettings() {
   el.settingsModal.classList.add("hidden");
+}
+
+function resetExperimentForm() {
+  el.systemPrompt.value = "";
+  for (const input of [
+    el.temperatureInput,
+    el.topPInput,
+    el.seedInput,
+    el.numCtxInput,
+    el.numPredictInput,
+  ]) {
+    input.value = "";
+  }
+}
+
+function experimentFromForm() {
+  return normalizeExperiment({
+    systemPrompt: el.systemPrompt.value.trim(),
+    temperature: el.temperatureInput.value,
+    topP: el.topPInput.value,
+    seed: el.seedInput.value,
+    numCtx: el.numCtxInput.value,
+    numPredict: el.numPredictInput.value,
+  });
+}
+
+function saveExperimentProfile() {
+  const c = activeConversation();
+  if (!c) return;
+  c.experiment = experimentFromForm();
+  c.updatedAt = nowIso();
+  saveConversations();
+  savePreferences();
+  renderExperimentMeta();
+  closeSettings();
 }
 
 function clearAllHistory() {
@@ -605,6 +792,144 @@ function clearAllHistory() {
   state.activeId = null;
   closeSettings();
   newConversation();
+}
+
+function shortDigest(digest) {
+  if (!digest) return "indisponível";
+  return digest.length > 16 ? `${digest.slice(0, 16)}…` : digest;
+}
+
+function formatRunOptions(options) {
+  const entries = Object.entries(options || {});
+  if (entries.length === 0) return "padrões do modelo";
+  return entries.map(([key, value]) => `${key}=${value}`).join(" · ");
+}
+
+function addTraceField(label, value, title = "") {
+  const item = document.createElement("div");
+  item.className = "trace-item";
+  const name = document.createElement("div");
+  name.className = "trace-label";
+  name.textContent = label;
+  const content = document.createElement("div");
+  content.className = "trace-value";
+  content.textContent = value || "—";
+  if (title) content.title = title;
+  item.append(name, content);
+  el.traceGrid.appendChild(item);
+}
+
+function canonicalContextJson(messages) {
+  const items = messages.map(message => {
+    const content = JSON.stringify(message.content);
+    const role = JSON.stringify(message.role);
+    return `{"content":${content},"role":${role}}`;
+  });
+  return `[${items.join(",")}]`;
+}
+
+async function sha256Hex(text) {
+  if (!crypto.subtle) return null;
+  const bytes = new TextEncoder().encode(text);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function openContextTrace(messageIndex) {
+  const c = activeConversation();
+  const message = c?.messages?.[messageIndex];
+  if (!c || !message?.run) return;
+
+  const run = message.run;
+  const profile = normalizeExperiment(run.profile);
+  const trace = run.trace && typeof run.trace === "object" ? run.trace : null;
+  const options = trace?.options || experimentOptions(profile);
+  const historyCount = Number.isInteger(run.contextMessageCount)
+    ? Math.min(run.contextMessageCount, messageIndex)
+    : messageIndex;
+
+  const contextMessages = [];
+  if (profile.systemPrompt.trim()) {
+    contextMessages.push({ role: "system", content: profile.systemPrompt });
+  }
+
+  for (const prior of c.messages.slice(0, historyCount)) {
+    if (
+      prior &&
+      ["user", "assistant", "system"].includes(prior.role) &&
+      typeof prior.content === "string"
+    ) {
+      contextMessages.push({ role: prior.role, content: prior.content });
+    }
+  }
+
+  el.traceGrid.innerHTML = "";
+  el.contextEntries.innerHTML = "";
+
+  const digest = trace?.digest || run.digest || "";
+  addTraceField("Modelo", trace?.model || run.model || c.model || "—");
+  addTraceField("Digest", shortDigest(digest), digest);
+  addTraceField("Parâmetros", formatRunOptions(options));
+  addTraceField("Mensagens", String(trace?.message_count ?? contextMessages.length));
+  addTraceField("Trace ID", trace?.id ? shortDigest(trace.id) : "snapshot local", trace?.id || "");
+  addTraceField(
+    "SHA-256 do contexto",
+    trace?.context_sha256 ? shortDigest(trace.context_sha256) : "indisponível",
+    trace?.context_sha256 || "",
+  );
+
+  if (trace) {
+    el.traceStatus.className = "trace-status";
+    el.traceStatus.textContent = "Verificando o snapshot local contra o trace do backend…";
+  } else {
+    el.traceStatus.className = "trace-status";
+    el.traceStatus.textContent = "Snapshot local: esta resposta não possui trace confirmado pelo backend (provavelmente foi gerada antes do P2).";
+  }
+
+  contextMessages.forEach((entry, index) => {
+    const card = document.createElement("section");
+    card.className = `context-entry context-${entry.role}`;
+    const head = document.createElement("div");
+    head.className = "context-entry-head";
+    head.textContent = `${index + 1}. ${entry.role}`;
+    const body = document.createElement("pre");
+    body.textContent = entry.content;
+    card.append(head, body);
+    el.contextEntries.appendChild(card);
+  });
+
+  el.contextModal.classList.remove("hidden");
+
+  if (trace) {
+    const countMatches = trace.message_count === contextMessages.length;
+    let hashMatches = null;
+    if (trace.context_sha256) {
+      try {
+        const reconstructedHash = await sha256Hex(canonicalContextJson(contextMessages));
+        hashMatches = reconstructedHash ? reconstructedHash === trace.context_sha256 : null;
+      } catch {
+        hashMatches = null;
+      }
+    }
+
+    const confirmed = countMatches && hashMatches === true;
+    const countOnly = countMatches && hashMatches === null;
+    el.traceStatus.className = `trace-status ${confirmed || countOnly ? "trace-ok" : "trace-warning"}`;
+
+    if (confirmed) {
+      el.traceStatus.textContent = "✓ Contexto confirmado: contagem e SHA-256 coincidem com o payload sanitizado enviado pelo backend ao Ollama.";
+    } else if (countOnly) {
+      el.traceStatus.textContent = "✓ Contagem confirmada pelo backend; o navegador não conseguiu recalcular o SHA-256 localmente.";
+    } else if (!countMatches) {
+      el.traceStatus.textContent = `⚠ O backend registrou ${trace.message_count} mensagens; a interface reconstruiu ${contextMessages.length}.`;
+    } else {
+      el.traceStatus.textContent = "⚠ A contagem coincide, mas o SHA-256 reconstruído difere do contexto registrado pelo backend.";
+    }
+  }
+}
+
+function closeContextTrace() {
+  el.contextModal.classList.add("hidden");
 }
 
 el.newChatBtn.addEventListener("click", newConversation);
@@ -625,7 +950,7 @@ el.modelSelect.addEventListener("change", () => {
     saveConversations();
     renderConversationList();
   }
-  saveSettings();
+  savePreferences();
   renderModelMeta();
 });
 
@@ -635,18 +960,22 @@ el.menuBtn.addEventListener("click", () => {
 
 el.settingsBtn.addEventListener("click", openSettings);
 el.closeSettingsBtn.addEventListener("click", closeSettings);
-el.saveSettingsBtn.addEventListener("click", () => {
-  saveSettings();
-  closeSettings();
-});
+el.resetExperimentBtn.addEventListener("click", resetExperimentForm);
+el.saveSettingsBtn.addEventListener("click", saveExperimentProfile);
 el.clearAllBtn.addEventListener("click", clearAllHistory);
+el.closeContextBtn.addEventListener("click", closeContextTrace);
 
 el.settingsModal.addEventListener("click", event => {
   if (event.target === el.settingsModal) closeSettings();
 });
+el.contextModal.addEventListener("click", event => {
+  if (event.target === el.contextModal) closeContextTrace();
+});
 
 document.addEventListener("keydown", event => {
-  if (event.key === "Escape") closeSettings();
+  if (event.key !== "Escape") return;
+  closeSettings();
+  closeContextTrace();
 });
 
 loadConversations();

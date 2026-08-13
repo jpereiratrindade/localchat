@@ -1,6 +1,8 @@
 import fnmatch
+import hashlib
 import json
 import os
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from pathlib import Path
@@ -94,6 +96,70 @@ def sanitize_options(raw: Any) -> dict[str, int | float]:
             cleaned[key] = max(minimum, min(maximum, value))
 
     return cleaned
+
+
+def clean_chat_messages(messages: Any, system_prompt: str = "") -> list[dict[str, str]]:
+    cleaned: list[dict[str, str]] = []
+    if system_prompt:
+        cleaned.append({"role": "system", "content": system_prompt})
+
+    if not isinstance(messages, list):
+        return cleaned
+
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        role = msg.get("role")
+        content = msg.get("content")
+        if role in {"user", "assistant", "system"} and isinstance(content, str):
+            cleaned.append({"role": role, "content": content})
+
+    return cleaned
+
+
+def resolve_model_digest(name: str) -> str | None:
+    """Resolve o digest no momento do ensaio, sem cache deliberadamente."""
+    try:
+        response = ollama_get("/api/tags", timeout=5)
+        response.raise_for_status()
+        payload = response.json()
+    except (requests.RequestException, ValueError):
+        return None
+
+    for item in payload.get("models", []):
+        if not isinstance(item, dict):
+            continue
+        item_name = item.get("name") or item.get("model")
+        if item_name == name:
+            digest = item.get("digest")
+            return str(digest) if digest else None
+    return None
+
+
+def build_context_trace(
+    *,
+    model: str,
+    digest: str | None,
+    messages: list[dict[str, str]],
+    options: dict[str, int | float],
+) -> dict[str, Any]:
+    canonical = json.dumps(
+        messages,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+    return {
+        "id": uuid.uuid4().hex,
+        "model": model,
+        "digest": digest,
+        "options": options,
+        "message_count": len(messages),
+        "roles": [message["role"] for message in messages],
+        "characters": [len(message["content"]) for message in messages],
+        "context_sha256": hashlib.sha256(canonical).hexdigest(),
+    }
 
 
 @app.get("/")
@@ -195,17 +261,9 @@ def chat():
     if not isinstance(messages, list) or not messages:
         return jsonify({"error": "A conversa está vazia."}), 400
 
-    clean_messages = []
-    if system_prompt:
-        clean_messages.append({"role": "system", "content": system_prompt})
-
-    for msg in messages:
-        if not isinstance(msg, dict):
-            continue
-        role = msg.get("role")
-        content = msg.get("content")
-        if role in {"user", "assistant", "system"} and isinstance(content, str):
-            clean_messages.append({"role": role, "content": content})
+    clean_messages = clean_chat_messages(messages, system_prompt)
+    if not clean_messages:
+        return jsonify({"error": "A conversa não contém mensagens válidas."}), 400
 
     payload: dict[str, Any] = {
         "model": model,
@@ -214,6 +272,14 @@ def chat():
     }
     if options:
         payload["options"] = options
+
+    digest = resolve_model_digest(model)
+    context_trace = build_context_trace(
+        model=model,
+        digest=digest,
+        messages=clean_messages,
+        options=options,
+    )
 
     def generate():
         try:
@@ -224,6 +290,18 @@ def chat():
                 timeout=(10, 600),
             ) as upstream:
                 upstream.raise_for_status()
+
+                # Evento LocalChat: comprova o contexto sanitizado efetivamente
+                # encaminhado ao Ollama sem duplicar todo o histórico no storage.
+                yield json.dumps(
+                    {
+                        "localchat": {
+                            "type": "context_trace",
+                            "trace": context_trace,
+                        }
+                    },
+                    ensure_ascii=False,
+                ) + "\n"
 
                 for line in upstream.iter_lines(decode_unicode=True):
                     if line:

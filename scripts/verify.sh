@@ -11,9 +11,9 @@ fi
 
 echo "==> Dependências Python"
 "$PYTHON" - <<'PY'
-import flask
+from importlib.metadata import version
 import requests
-print(f"Flask: {flask.__version__ if hasattr(flask, '__version__') else 'OK'}")
+print(f"Flask: {version('flask')}")
 print(f"requests: {requests.__version__}")
 PY
 
@@ -43,4 +43,4 @@ echo "==> Git whitespace"
 git diff --check
 
 echo
-echo "[PASS] LocalChat P1 verificado."
+echo "[PASS] LocalChat P2 verificado."
