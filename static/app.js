@@ -1,4 +1,5 @@
-const STORAGE_KEY = "localchat.conversations.v1";
+const STORAGE_KEY = "localchat.conversations.v2";
+const LEGACY_STORAGE_KEY = "localchat.conversations.v1";
 const SETTINGS_KEY = "localchat.settings.v1";
 
 const state = {
@@ -6,6 +7,7 @@ const state = {
   activeId: null,
   generating: false,
   controller: null,
+  models: [],
 };
 
 const el = {
@@ -16,6 +18,7 @@ const el = {
   statusDot: document.getElementById("statusDot"),
   statusText: document.getElementById("statusText"),
   modelSelect: document.getElementById("modelSelect"),
+  modelMeta: document.getElementById("modelMeta"),
   settingsBtn: document.getElementById("settingsBtn"),
   chatArea: document.getElementById("chatArea"),
   welcome: document.getElementById("welcome"),
@@ -44,6 +47,7 @@ function newConversation() {
     title: "Nova conversa",
     createdAt: nowIso(),
     updatedAt: nowIso(),
+    model: el.modelSelect?.value || "",
     messages: [],
   };
   state.conversations.unshift(c);
@@ -57,15 +61,23 @@ function activeConversation() {
   return state.conversations.find(c => c.id === state.activeId) || null;
 }
 
+function normalizeConversation(c) {
+  if (!c || typeof c !== "object") return null;
+  return {
+    ...c,
+    model: typeof c.model === "string" ? c.model : "",
+    messages: Array.isArray(c.messages) ? c.messages : [],
+  };
+}
+
 function loadConversations() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    state.conversations = raw ? JSON.parse(raw) : [];
+    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    state.conversations = Array.isArray(parsed)
+      ? parsed.map(normalizeConversation).filter(Boolean)
+      : [];
   } catch {
-    state.conversations = [];
-  }
-
-  if (!Array.isArray(state.conversations)) {
     state.conversations = [];
   }
 
@@ -75,6 +87,7 @@ function loadConversations() {
   }
 
   state.activeId = state.conversations[0].id;
+  saveConversations();
   renderAll();
 }
 
@@ -112,6 +125,7 @@ function deleteConversation(id, event) {
 
   saveConversations();
   renderAll();
+  syncConversationModel();
 }
 
 function renderConversationList() {
@@ -122,9 +136,18 @@ function renderConversationList() {
     row.type = "button";
     row.className = `conversation-item ${c.id === state.activeId ? "active" : ""}`;
 
+    const content = document.createElement("span");
+    content.className = "conversation-content";
+
     const name = document.createElement("span");
     name.className = "conversation-name";
     name.textContent = c.title || "Nova conversa";
+
+    const model = document.createElement("span");
+    model.className = "conversation-model";
+    model.textContent = c.model || "modelo não fixado";
+
+    content.append(name, model);
 
     const remove = document.createElement("button");
     remove.type = "button";
@@ -133,10 +156,11 @@ function renderConversationList() {
     remove.textContent = "×";
     remove.addEventListener("click", event => deleteConversation(c.id, event));
 
-    row.append(name, remove);
+    row.append(content, remove);
     row.addEventListener("click", () => {
       state.activeId = c.id;
       renderAll();
+      syncConversationModel();
       el.sidebar.classList.remove("open");
     });
 
@@ -144,7 +168,42 @@ function renderConversationList() {
   }
 }
 
-function addMessageElement(role, content) {
+function formatSeconds(ns) {
+  if (!Number.isFinite(ns) || ns <= 0) return null;
+  return `${(ns / 1e9).toFixed(ns >= 10e9 ? 1 : 2)} s`;
+}
+
+function formatMetricNumber(value) {
+  return Number.isFinite(value) ? new Intl.NumberFormat("pt-BR").format(value) : null;
+}
+
+function metricsSummary(metrics) {
+  if (!metrics || typeof metrics !== "object") return "";
+
+  const parts = [];
+  const promptTokens = formatMetricNumber(metrics.prompt_eval_count);
+  const outputTokens = formatMetricNumber(metrics.eval_count);
+  const totalTime = formatSeconds(metrics.total_duration);
+
+  if (promptTokens) parts.push(`${promptTokens} tok entrada`);
+  if (outputTokens) parts.push(`${outputTokens} tok saída`);
+
+  if (
+    Number.isFinite(metrics.eval_count) &&
+    Number.isFinite(metrics.eval_duration) &&
+    metrics.eval_duration > 0
+  ) {
+    const tokensPerSecond = metrics.eval_count / (metrics.eval_duration / 1e9);
+    parts.push(`${tokensPerSecond.toFixed(1)} tok/s`);
+  }
+
+  if (totalTime) parts.push(totalTime);
+  if (metrics.done_reason) parts.push(metrics.done_reason);
+
+  return parts.join(" · ");
+}
+
+function addMessageElement(role, content, metrics = null) {
   const wrapper = document.createElement("article");
   wrapper.className = `message ${role}`;
 
@@ -163,11 +222,17 @@ function addMessageElement(role, content) {
   body.className = "message-body";
   body.textContent = content;
 
-  contentWrap.append(roleEl, body);
+  const meta = document.createElement("div");
+  meta.className = "message-metrics";
+  const summary = metricsSummary(metrics);
+  meta.textContent = summary;
+  meta.classList.toggle("hidden", !summary);
+
+  contentWrap.append(roleEl, body, meta);
   wrapper.append(avatar, contentWrap);
   el.messages.appendChild(wrapper);
 
-  return body;
+  return { body, meta };
 }
 
 function renderMessages() {
@@ -178,7 +243,7 @@ function renderMessages() {
   el.welcome.classList.toggle("hidden", messages.length > 0);
 
   for (const msg of messages) {
-    addMessageElement(msg.role, msg.content);
+    addMessageElement(msg.role, msg.content, msg.metrics || null);
   }
 
   requestAnimationFrame(scrollToBottom);
@@ -210,6 +275,24 @@ function deriveTitle(text) {
   return compact.length > 42 ? `${compact.slice(0, 42)}…` : compact || "Nova conversa";
 }
 
+function captureMetrics(data) {
+  const keys = [
+    "total_duration",
+    "load_duration",
+    "prompt_eval_count",
+    "prompt_eval_duration",
+    "eval_count",
+    "eval_duration",
+    "done_reason",
+  ];
+
+  const metrics = {};
+  for (const key of keys) {
+    if (data[key] !== undefined && data[key] !== null) metrics[key] = data[key];
+  }
+  return metrics;
+}
+
 async function sendMessage() {
   if (state.generating) return;
 
@@ -220,13 +303,14 @@ async function sendMessage() {
   if (!text || !c) return;
 
   if (!model) {
-    alert("Nenhum modelo do Ollama está selecionado.");
+    alert("Nenhum modelo de chat do Ollama está selecionado.");
     return;
   }
 
   if (c.messages.length === 0) {
     c.title = deriveTitle(text);
   }
+  c.model = model;
 
   c.messages.push({ role: "user", content: text });
   c.updatedAt = nowIso();
@@ -236,11 +320,11 @@ async function sendMessage() {
   saveConversations();
   renderAll();
 
-  const assistantMessage = { role: "assistant", content: "" };
+  const assistantMessage = { role: "assistant", content: "", metrics: null };
   c.messages.push(assistantMessage);
 
-  const assistantBody = addMessageElement("assistant", "");
-  assistantBody.classList.add("typing");
+  const assistantEl = addMessageElement("assistant", "");
+  assistantEl.body.classList.add("typing");
   el.welcome.classList.add("hidden");
   scrollToBottom();
 
@@ -304,15 +388,22 @@ async function sendMessage() {
         const chunk = data.message?.content || "";
         if (chunk) {
           assistantMessage.content += chunk;
-          assistantBody.textContent = assistantMessage.content;
+          assistantEl.body.textContent = assistantMessage.content;
           scrollToBottom();
+        }
+
+        if (data.done) {
+          assistantMessage.metrics = captureMetrics(data);
+          const summary = metricsSummary(assistantMessage.metrics);
+          assistantEl.meta.textContent = summary;
+          assistantEl.meta.classList.toggle("hidden", !summary);
         }
       }
     }
 
     if (!assistantMessage.content.trim()) {
       assistantMessage.content = "(O modelo terminou sem retornar texto.)";
-      assistantBody.textContent = assistantMessage.content;
+      assistantEl.body.textContent = assistantMessage.content;
     }
 
   } catch (error) {
@@ -326,9 +417,9 @@ async function sendMessage() {
       assistantMessage.content = `Erro: ${error.message}`;
     }
 
-    assistantBody.textContent = assistantMessage.content;
+    assistantEl.body.textContent = assistantMessage.content;
   } finally {
-    assistantBody.classList.remove("typing");
+    assistantEl.body.classList.remove("typing");
     c.updatedAt = nowIso();
     saveConversations();
     renderConversationList();
@@ -343,6 +434,69 @@ function stopGeneration() {
   state.controller?.abort();
 }
 
+function humanBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let index = 0;
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index += 1;
+  }
+  return `${value.toFixed(index >= 3 ? 1 : 0)} ${units[index]}`;
+}
+
+function humanContext(tokens) {
+  if (!Number.isFinite(tokens) || tokens <= 0) return "";
+  if (tokens >= 1024) return `${Math.round(tokens / 1024)}K ctx`;
+  return `${tokens} ctx`;
+}
+
+function selectedModel() {
+  return state.models.find(model => model.name === el.modelSelect.value) || null;
+}
+
+function renderModelMeta() {
+  const model = selectedModel();
+  if (!model) {
+    el.modelMeta.textContent = "";
+    return;
+  }
+
+  const details = model.details || {};
+  const profile = model.profile || {};
+  const parts = [];
+
+  if (profile.category) parts.push(profile.category);
+  if (details.parameter_size) parts.push(details.parameter_size);
+  if (details.quantization_level) parts.push(details.quantization_level);
+  if (model.context_length) parts.push(humanContext(model.context_length));
+  if (model.size) parts.push(humanBytes(model.size));
+  if (model.capabilities?.includes("vision")) parts.push("visão");
+
+  el.modelMeta.textContent = parts.join(" · ");
+  el.modelMeta.title = profile.description || model.name;
+}
+
+function syncConversationModel() {
+  const c = activeConversation();
+  if (!c || state.models.length === 0) {
+    renderModelMeta();
+    return;
+  }
+
+  const chatModels = state.models.filter(model => model.chat_capable !== false);
+  if (chatModels.length === 0) return;
+
+  if (c.model && chatModels.some(model => model.name === c.model)) {
+    el.modelSelect.value = c.model;
+  } else if (!el.modelSelect.value || !chatModels.some(model => model.name === el.modelSelect.value)) {
+    el.modelSelect.value = chatModels[0].name;
+  }
+
+  renderModelMeta();
+}
+
 async function loadModels() {
   const settings = getSettings();
 
@@ -354,35 +508,67 @@ async function loadModels() {
       throw new Error(data.error || "Falha ao carregar modelos.");
     }
 
-    const models = data.models || [];
+    state.models = Array.isArray(data.models) ? data.models : [];
+    const models = state.models.filter(model => model.chat_capable !== false);
     el.modelSelect.innerHTML = "";
 
     if (models.length === 0) {
       const option = document.createElement("option");
       option.value = "";
-      option.textContent = "Nenhum modelo instalado";
+      option.textContent = state.models.length
+        ? "Nenhum modelo com capacidade de chat"
+        : "Nenhum modelo instalado";
       el.modelSelect.appendChild(option);
+      renderModelMeta();
       return;
     }
 
+    const groups = new Map();
     for (const model of models) {
-      const option = document.createElement("option");
-      option.value = model.name;
-      option.textContent = model.name;
-      el.modelSelect.appendChild(option);
+      const category = model.profile?.category || "outros";
+      if (!groups.has(category)) groups.set(category, []);
+      groups.get(category).push(model);
     }
 
+    for (const [category, items] of groups.entries()) {
+      const group = document.createElement("optgroup");
+      group.label = category.charAt(0).toUpperCase() + category.slice(1);
+
+      for (const model of items) {
+        const option = document.createElement("option");
+        option.value = model.name;
+        const label = model.profile?.label || model.name;
+        const parameters = model.details?.parameter_size;
+        option.textContent = parameters ? `${label} · ${parameters}` : label;
+        group.appendChild(option);
+      }
+
+      el.modelSelect.appendChild(group);
+    }
+
+    const c = activeConversation();
     const preferred =
+      c?.model ||
       settings.model ||
       window.LOCALCHAT_DEFAULT_MODEL ||
       data.default_model ||
       models[0].name;
 
-    const exists = models.some(m => m.name === preferred);
+    const exists = models.some(model => model.name === preferred);
     el.modelSelect.value = exists ? preferred : models[0].name;
 
-  } catch (error) {
+    if (c && !c.model) {
+      c.model = el.modelSelect.value;
+      saveConversations();
+      renderConversationList();
+    }
+
+    renderModelMeta();
+
+  } catch {
+    state.models = [];
     el.modelSelect.innerHTML = '<option value="">Ollama indisponível</option>';
+    renderModelMeta();
   }
 }
 
@@ -414,6 +600,7 @@ function clearAllHistory() {
   if (!confirm("Apagar todas as conversas salvas neste navegador?")) return;
 
   localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem(LEGACY_STORAGE_KEY);
   state.conversations = [];
   state.activeId = null;
   closeSettings();
@@ -430,7 +617,17 @@ el.promptInput.addEventListener("keydown", event => {
     sendMessage();
   }
 });
-el.modelSelect.addEventListener("change", saveSettings);
+el.modelSelect.addEventListener("change", () => {
+  const c = activeConversation();
+  if (c) {
+    c.model = el.modelSelect.value;
+    c.updatedAt = nowIso();
+    saveConversations();
+    renderConversationList();
+  }
+  saveSettings();
+  renderModelMeta();
+});
 
 el.menuBtn.addEventListener("click", () => {
   el.sidebar.classList.toggle("open");

@@ -1,0 +1,123 @@
+{
+  "profiles": [
+    {
+      "match": "devstral-small-2:*",
+      "label": "Devstral Small 2",
+      "category": "codigo",
+      "description": "Código e tarefas de engenharia de software.",
+      "tags": ["codigo", "agente"]
+    },
+    {
+      "match": "deepseek-coder:*",
+      "label": "DeepSeek Coder",
+      "category": "codigo",
+      "description": "Modelo especialista em programação.",
+      "tags": ["codigo"]
+    },
+    {
+      "match": "codellama:*",
+      "label": "Code Llama",
+      "category": "codigo",
+      "description": "Modelo orientado a código.",
+      "tags": ["codigo"]
+    },
+    {
+      "match": "codegemma:*",
+      "label": "CodeGemma",
+      "category": "codigo",
+      "description": "Modelo Gemma especializado em código.",
+      "tags": ["codigo"]
+    },
+    {
+      "match": "stable-code:*",
+      "label": "Stable Code",
+      "category": "codigo",
+      "description": "Modelo compacto para tarefas de programação.",
+      "tags": ["codigo", "compacto"]
+    },
+    {
+      "match": "qwen2.5:14b",
+      "label": "Qwen 2.5 14B",
+      "category": "geral",
+      "description": "Generalista de maior porte para raciocínio e texto.",
+      "tags": ["geral", "14b"]
+    },
+    {
+      "match": "qwen2.5:*",
+      "label": "Qwen 2.5",
+      "category": "geral",
+      "description": "Família generalista multilíngue.",
+      "tags": ["geral", "multilingue"]
+    },
+    {
+      "match": "gemma3:*",
+      "label": "Gemma 3",
+      "category": "geral",
+      "description": "Família generalista; algumas variantes possuem capacidades multimodais.",
+      "tags": ["geral"]
+    },
+    {
+      "match": "llama3:*",
+      "label": "Llama 3",
+      "category": "geral",
+      "description": "Modelo generalista para comparação.",
+      "tags": ["geral"]
+    },
+    {
+      "match": "llama3.2:*",
+      "label": "Llama 3.2",
+      "category": "geral",
+      "description": "Modelo compacto generalista.",
+      "tags": ["geral", "compacto"]
+    },
+    {
+      "match": "mistral:*",
+      "label": "Mistral",
+      "category": "geral",
+      "description": "Modelo generalista para baseline.",
+      "tags": ["geral", "baseline"]
+    },
+    {
+      "match": "falcon:*",
+      "label": "Falcon",
+      "category": "geral",
+      "description": "Modelo generalista para baseline histórico.",
+      "tags": ["geral", "baseline"]
+    },
+    {
+      "match": "zephyr:*",
+      "label": "Zephyr",
+      "category": "geral",
+      "description": "Modelo ajustado para conversação.",
+      "tags": ["chat", "baseline"]
+    },
+    {
+      "match": "phi3:*",
+      "label": "Phi-3",
+      "category": "geral",
+      "description": "Modelo compacto para comparação de eficiência.",
+      "tags": ["geral", "compacto"]
+    },
+    {
+      "match": "tinyllama:*",
+      "label": "TinyLlama",
+      "category": "geral",
+      "description": "Modelo muito pequeno, útil como baseline de custo.",
+      "tags": ["baseline", "compacto"]
+    },
+    {
+      "match": "gemma:2b",
+      "label": "Gemma 2B",
+      "category": "geral",
+      "description": "Modelo compacto para baseline.",
+      "tags": ["baseline", "compacto"]
+    },
+    {
+      "match": "nomic-embed-text:*",
+      "label": "Nomic Embed Text",
+      "category": "embedding",
+      "description": "Modelo de embeddings; não deve aparecer como modelo de chat.",
+      "tags": ["embedding", "rag"]
+    }
+  ]
+}

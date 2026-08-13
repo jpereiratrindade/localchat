@@ -36,9 +36,12 @@
 
         <div class="model-box">
           <label for="modelSelect">Modelo</label>
-          <select id="modelSelect">
-            <option value="">Carregando…</option>
-          </select>
+          <div class="model-stack">
+            <select id="modelSelect">
+              <option value="">Carregando…</option>
+            </select>
+            <div class="model-meta" id="modelMeta"></div>
+          </div>
         </div>
 
         <button class="icon-button" id="settingsBtn" type="button" title="Configurações" aria-label="Configurações">⚙</button>
@@ -48,7 +51,7 @@
         <div class="welcome" id="welcome">
           <div class="welcome-logo">L</div>
           <h1>LocalChat</h1>
-          <p>Uma interface local para conversar com seus modelos do Ollama.</p>
+          <p>Chat local e bancada experimental para modelos do Ollama.</p>
         </div>
 
         <div class="messages" id="messages"></div>

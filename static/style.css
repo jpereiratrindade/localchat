@@ -531,3 +531,50 @@ button {
     padding-inline: 10px;
   }
 }
+
+/* P1 — perfis e observabilidade experimental */
+.model-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.model-meta {
+  min-height: 14px;
+  overflow: hidden;
+  color: #7f8288;
+  font-size: 10px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.conversation-model {
+  overflow: hidden;
+  margin-top: 2px;
+  color: #71747a;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-metrics {
+  margin-top: 8px;
+  color: #777a80;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+@media (max-width: 760px) {
+  .model-meta {
+    display: none;
+  }
+}
