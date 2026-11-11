@@ -98,3 +98,9 @@ node --check static/app.js
 - P3: modo Laboratório para comparação A/B entre modelos;
 - P4: catálogo curado Ollama/Hugging Face;
 - P5: embeddings, RAG e reranking.
+
+## Premissas de desenvolvimento
+
+**Simples, leve. Sempre pronto. Sempre incompleto!**
+
+[Significado e símbolos das premissas](docs/sister-principles/README.md).
